@@ -6,3 +6,6 @@ Cargo.lock
 venv
 __pycache__
 *py
+
+# Test documents
+x.*
