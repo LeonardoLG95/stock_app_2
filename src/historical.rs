@@ -1,6 +1,7 @@
+use chrono::DateTime;
 use futures::future::join_all;
+use json::JsonValue;
 use reqwest::Client;
-use serde_json::Value;
 use std::collections::HashSet;
 use std::error::Error;
 
@@ -22,15 +23,15 @@ fn url(symbol: &str) -> String {
 async fn fetch_url(
     client: Client,
     url: String,
-) -> Result<Option<Value>, Box<dyn Error + Send + Sync>> {
-    let response: Value = match client
+) -> Result<Option<JsonValue>, Box<dyn Error + Send + Sync>> {
+    let response: JsonValue = match client
         .get(url)
         .header("User-Agent", USER_AGENT)
         .send()
         .await
     {
-        Ok(res) => match res.json().await {
-            Ok(json) => json,
+        Ok(res) => match res.text().await {
+            Ok(json) => json::parse(&json).unwrap(),
             Err(err) => {
                 println!("Failed to parse JSON: {}", err);
                 return Ok(None);
@@ -42,6 +43,57 @@ async fn fetch_url(
         }
     };
     Ok(Some(response))
+}
+
+/**
+ * Takes all the tasks awaits for them and filter unnecessary nested objects
+ */
+async fn handle_requests(
+    handles: Vec<tokio::task::JoinHandle<Result<Option<JsonValue>, Box<dyn Error + Send + Sync>>>>,
+) -> Result<Vec<JsonValue>, Box<dyn Error + Sync + Send>> {
+    let raw_data = join_all(handles).await;
+
+    // Filter Nones, Result and Option wrappers
+    let filtered_data: Vec<JsonValue> = raw_data
+        .into_iter()
+        .filter_map(|outer| outer.ok()?.ok()?.map(|value| value))
+        .collect();
+
+    Ok(filtered_data)
+}
+
+/**
+ * Temporal function to know how to access JSONs in Rust
+ */
+fn print_stock(stock: JsonValue) -> Result<(), Box<dyn Error + Sync + Send>> {
+    let full_name = stock["chart"]["result"][0]["meta"]["longName"]
+        .as_str()
+        .unwrap_or("Not found");
+    let symbol = stock["chart"]["result"][0]["meta"]["symbol"]
+        .as_str()
+        .unwrap_or("Not found");
+    let timestamps: Vec<_> = stock["chart"]["result"][0]["timestamp"]
+        .members()
+        .filter_map(|x| x.as_i64())
+        .collect();
+    let prices: Vec<_> = stock["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        .members()
+        .filter_map(|x| x.as_f64())
+        .collect();
+
+    let first_time =
+        DateTime::from_timestamp(timestamps.first().unwrap_or(&0).clone(), 0).unwrap_or_default();
+    let last_time =
+        DateTime::from_timestamp(timestamps.last().unwrap_or(&0).clone(), 0).unwrap_or_default();
+
+    println!("{}", full_name);
+    println!("Symbol: {}", symbol);
+    println!("First record time: {}", first_time);
+    println!("Last record time: {}", last_time);
+    println!("Last record price: {}$", prices.last().unwrap_or(&0.0));
+    println!("-------------------------------------------------");
+
+    Ok(())
 }
 
 /**
@@ -57,15 +109,11 @@ pub async fn extract_historical(
         handles.push(handle);
     }
 
-    let results = join_all(handles).await;
-
-    // Filter Nones
-    let values: Vec<_> = results.into_iter().filter_map(|x| Some(x)).collect();
-
-    let total = values.len();
-    // for value in values {
-    //     println!("{:?}", value);
-    // }
+    let filtered_data = handle_requests(handles).await?;
+    let total = filtered_data.len();
+    for stock in filtered_data {
+        let _ = print_stock(stock);
+    }
     println!("Total stocks pulled: {}", total);
 
     Ok(())
