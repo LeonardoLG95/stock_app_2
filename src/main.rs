@@ -1,18 +1,13 @@
 mod historical;
+mod macd;
 mod symbols;
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    match symbols::extract_data().await {
-        Ok(symbols) => {
-            historical::extract_historical(symbols).await?;
-        }
-        Err(e) => {
-            println!("Error: {}", e);
-        }
-    }
+    let symbols = symbols::extract_data().await?;
+    let historic = historical::extract_historical(symbols).await?;
+    let _historic_macd = macd::calculate_macd(historic);
+    // println!("{}", historic);
     Ok(())
 }
-
-// test
