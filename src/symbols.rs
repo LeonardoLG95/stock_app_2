@@ -1,3 +1,4 @@
+use crate::utils::USER_AGENT;
 use futures::future::join_all;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -5,15 +6,8 @@ use std::collections::HashSet;
 use std::error::Error;
 use tokio;
 
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.99 Safari/537.36";
+const URL: &str = "https://www.slickcharts.com/{}";
 const INDEXES: [&str; 3] = ["sp500", "nasdaq100", "dowjones"];
-
-/**
- * Outputs the URL + each content in INDEXES constant
- */
-fn url(index: &str) -> String {
-    format!("https://www.slickcharts.com/{}", index)
-}
 
 /**
  * Fetch asynchronously 1 URL and parses it
@@ -68,7 +62,7 @@ pub async fn extract_data() -> Result<HashSet<String>, Box<dyn Error + Send + Sy
     let client = Client::new();
     let mut handles = vec![];
     for index in &INDEXES {
-        let handle = tokio::spawn(fetch_url(client.clone(), url(index)));
+        let handle = tokio::spawn(fetch_url(client.clone(), URL.replace("{}", index)));
         handles.push(handle);
     }
 
